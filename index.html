@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ExamSaathi: Know exactly what to study today</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>ExamSaathi</h1>
+      <p class="tag">Know exactly what to study today.</p>
+    </div>
+    <div class="row">
+      <button id="demo">Load demo data</button>
+      <button id="theme">Dark mode</button>
+    </div>
+  </header>
+
+  <!-- Add subject -->
+  <section class="card">
+    <div class="head"><h2>Add a subject</h2></div>
+    <div id="addbox">
+      <label class="f" for="name">Subject name</label>
+      <input type="text" id="name" placeholder="e.g. DBMS">
+      <div class="grid2">
+        <div><label class="f" for="date">Exam date</label><input type="date" id="date"></div>
+        <div><label class="f" for="topics">Topics, separated by commas</label><input type="text" id="topics" placeholder="ER Model, Normalization, SQL"></div>
+      </div>
+      <button class="primary" id="add">Create study plan</button>
+      <p class="msg" id="msg"></p>
+    </div>
+  </section>
+
+  <!-- Today checklist (filled by render) -->
+  <section class="card today" id="today"></section>
+
+  <!-- Performance (filled by render) -->
+  <section class="card" id="perf"></section>
+
+  <!-- Ask AI -->
+  <section class="card">
+    <div class="head"><h2>Ask AI</h2></div>
+    <label class="f" for="askSubject">Subject (choose one to keep answers subject-specific)</label>
+    <select id="askSubject"><option value="">Auto-detect subject</option></select>
+    <input type="text" id="q" placeholder="Ask any doubt, e.g. Difference between 2NF and 3NF">
+    <button class="primary" data-act="ask">Ask</button>
+    <div class="ans" id="answer"></div>
+  </section>
+
+  <!-- Shared PYQ area: students can browse teacher uploads and built-in PYQs -->
+  <section class="card" id="pyqSection">
+    <div class="head"><div><h2>Previous Year Questions (PYQs)</h2><small>Built-in notes and questions, plus PYQs shared by your teacher</small></div></div>
+    <div class="grid2">
+      <input id="pyqSearch" type="text" placeholder="Search subject, topic or question">
+      <select id="pyqSubject"><option value="">All subjects</option></select>
+    </div>
+    <div id="pyqList" class="pyq-list"><p class="empty">Loading PYQs…</p></div>
+  </section>
+
+  <!-- Teacher-only area -->
+  <section class="card" id="teacherSection">
+    <div class="head"><div><h2>Teacher Corner</h2><small>Sign in to publish PYQs for all students</small></div></div>
+    <div id="teacherLogin">
+      <label class="f" for="teacherPassword">Teacher password</label>
+      <input id="teacherPassword" type="password" placeholder="Enter teacher password">
+      <button class="primary" id="teacherSignIn">Teacher sign in</button>
+      <p class="msg" id="teacherMsg"></p>
+    </div>
+    <div id="teacherTools" hidden>
+      <div class="grid2">
+        <div><label class="f" for="teacherSubject">Subject</label><input id="teacherSubject" type="text" placeholder="e.g. DBMS"></div>
+        <div><label class="f" for="teacherTopic">Topic / unit</label><input id="teacherTopic" type="text" placeholder="e.g. Normalization"></div>
+      </div>
+      <div class="grid2">
+        <div><label class="f" for="teacherYear">Year (optional)</label><input id="teacherYear" type="text" placeholder="e.g. 2024"></div>
+        <div><label class="f" for="teacherAnswer">Answer / marking hints (optional)</label><input id="teacherAnswer" type="text" placeholder="Short answer or key points"></div>
+      </div>
+      <label class="f" for="teacherQuestion">PYQ question</label>
+      <textarea id="teacherQuestion" rows="3" placeholder="Paste or type the previous-year question"></textarea>
+      <button class="primary" id="publishPyq">Publish PYQ for students</button>
+      <hr>
+      <h3>Upload notes or question-paper photos</h3>
+      <small>Choose the correct subject and topic. ExamSaathi will read the picture and add its text to that subject's study library.</small>
+      <label class="f" for="materialSubject">Subject</label>
+      <input id="materialSubject" type="text" placeholder="e.g. DBMS">
+      <label class="f" for="materialTopic">Topic / unit</label>
+      <input id="materialTopic" type="text" placeholder="e.g. Normalization (optional)">
+      <label class="f" for="materialFile">Photo of notes or question paper</label>
+      <input id="materialFile" type="file" accept="image/*">
+      <button class="primary" id="uploadMaterial">Upload and read photo</button>
+      <p class="msg" id="materialMsg"></p>
+      <h3>Uploaded study materials</h3>
+      <div id="teacherMaterials"></div>
+      <button id="teacherSignOut">Sign out</button>
+      <p class="msg" id="teacherMsg2"></p>
+      <h3>Your published questions</h3>
+      <div id="teacherPublished"></div>
+    </div>
+  </section>
+
+  <!-- Subject cards (filled by render) -->
+  <div id="subjects"></div>
+  <p class="tag" style="text-align:center">Your data is saved on this device only.</p>
+</div>
+
+<!-- Plus button: add many subjects at once -->
+<button class="fab" data-act="plus" aria-label="Add subjects">+</button>
+
+<!-- Popup used by "Explain simply" and "Quiz me" -->
+<div class="ov" id="ov"><div class="panel" id="panel"></div></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
