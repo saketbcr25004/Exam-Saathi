@@ -147,23 +147,38 @@ const CANNED = {
 };
 
 async function getAIResponse(type, topic, sub){
-  const n = sub && findNotes(sub, topic);                       // quiz from your own notes first
-  if(type === "quiz" && n && n.quiz && n.quiz.length) return n.quiz;
-  const key = Object.keys(CANNED).find(k => topic.toLowerCase().includes(k));
-  if(key) return CANNED[key][type];
-  // Generic answers for any other topic
-  if(type === "explain") return [
-    topic + " ek important topic hai jo exam mein aksar poochha jaata hai.",
-    "Sabse pehle iski definition simple words mein yaad karo.",
-    "Phir ek real-life example se samjho, taaki concept yaad rahe.",
-    "Key points ki chhoti list banao, aur diagram ya table ho to wo bhi.",
-    "Last mein 2-3 previous year questions solve karke khud ko check karo."];
-  return [
-    [topic + " padhne ka sabse accha pehla step kya hai?", ["Definition aur basic concept samajhna","Seedha ratna shuru karna","Sirf last day padhna","Topic skip karna"], 0],
-    [topic + " yaad rakhne ka best tarika kaunsa hai?", ["Sirf ek baar padhna","Example ke saath practice karna","Bina likhe dekhna","Raat bhar ratna"], 1],
-    ["Exam se pehle " + topic + " ke liye kya karna chahiye?", ["Notes jala dena","Topic ignore karna","Previous year questions solve karna","Naya topic shuru karna"], 2],
-    ["Revision ka sabse bada fayda kya hai?", ["Time waste hota hai","Confusion badhta hai","Kuch farak nahi padta","Concepts yaad rehte hain"], 3],
-    [topic + " mein doubt ho to kya karna chahiye?", ["Chhod dena","Guess karna","Ignore karna","Teacher ya friend se poochhna"], 3]];
+  const prompt = {
+    type, subject: sub || "General", topic, language: "English only",
+    instructions: type === "explain"
+      ? "Explain this topic in 5 short, easy English points for a BCA student. Use relevant notes or reliable general knowledge, including for out-of-syllabus topics. Return JSON exactly as {\"points\":[\"...\",\"...\",\"...\",\"...\",\"...\"]}."
+      : "Create exactly 5 exam-style multiple-choice questions in simple English using relevant uploaded notes or general knowledge when notes are unavailable. Never refuse out-of-syllabus topics. Every question must have 4 English options and one correct answer. Return JSON exactly as {\"questions\":[{\"question\":\"...\",\"options\":[\"A\",\"B\",\"C\",\"D\"],\"answer\":0}]} where answer is 0, 1, 2 or 3."
+  };
+  try{
+    const r=await fetch("/api/learn",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(prompt)});
+    const data=await r.json(); if(!r.ok) throw new Error(data.error||"AI learning request failed");
+    const parsed=typeof data.result==="string"?JSON.parse(data.result):data.result;
+    if(type==="explain"){
+      if(!Array.isArray(parsed.points)||!parsed.points.length) throw new Error("AI returned no explanation");
+      return parsed.points.slice(0,5).map(String);
+    }
+    if(!Array.isArray(parsed.questions)||!parsed.questions.length) throw new Error("AI returned no quiz questions");
+    return parsed.questions.slice(0,5).map(q=>[String(q.question),(q.options||[]).slice(0,4).map(String),Math.max(0,Math.min(3,Number(q.answer)||0))]).filter(q=>q[1].length===4);
+  }catch(error){
+    if(type==="explain") return [
+      topic+" is an important topic in "+(sub||"your subject")+".",
+      "Start by learning its definition and main purpose.",
+      "Understand each key term and how the concept works.",
+      "Connect the idea with a small practical or textbook example.",
+      "Revise the important points and practise exam questions."
+    ];
+    return [
+      ["What should you learn first about "+topic+"?",["Its definition and basic concept","Only its page number","Unrelated topics","Nothing about it"],0],
+      ["Which method helps you understand "+topic+"?",["Avoiding examples","Reading once only","Studying key points with examples","Skipping revision"],2],
+      ["What is a useful way to prepare "+topic+" for an exam?",["Ignore the syllabus","Practise relevant questions","Memorise unrelated facts","Skip the topic"],1],
+      ["What should you do after studying "+topic+"?",["Never review it","Delete your notes","Stop practising","Revise and test your understanding"],3],
+      ["If a concept in "+topic+" is unclear, what is the best step?",["Guess every answer","Leave the whole subject","Review the notes and ask for clarification","Study an unrelated subject"],2]
+    ];
+  }
 }
 
 // Show the popup with an explanation or a quiz
@@ -171,11 +186,14 @@ async function openAI(type, topic, sub){
   quizCtx = {sub: sub, topic: topic};
   $("ov").classList.add("show");
   $("panel").innerHTML = "<p>Thinking…</p>";
-  const data = await getAIResponse(type, topic, sub);
+  let data;
+  try { data = await getAIResponse(type, topic, sub); }
+  catch(e){ data = type === "explain" ? [topic + " is an important topic.", "Learn its definition.", "Understand its key points.", "Study one example.", "Revise and practise questions."] : []; }
   let body = "";
   if(type === "explain"){
     body = data.map((l, i) => '<p class="line"><b>' + (i+1) + '.</b> ' + esc(l) + '</p>').join("");
   } else {
+    if(!data.length) data = [[ "What is the best first step when studying " + topic + "?", ["Learn the definition","Skip the topic","Study unrelated material","Avoid revision"], 0 ]];
     score = 0; quizTotal = data.length;
     body = '<p class="score" id="score">Score: 0 / ' + quizTotal + '</p>' + data.map((q, qi) =>
       '<div class="q"><p><b>Q' + (qi+1) + '.</b> ' + esc(q[0]) + '</p>' +
@@ -287,17 +305,29 @@ function findNotes(sub, topic){
 
 // Notes popup with tabs: short, medium, long, PYQs
 const TABS = [["short","Short (2 marks)"], ["medium","Medium (5 marks)"], ["long","Long (10 marks)"], ["pyq","PYQs"]];
-function openNotes(sub, topic, tab){
-  const n = findNotes(sub, topic), items = (n && n[tab]) || [];
+async function openNotes(sub, topic, tab){
+  // Generate a fresh English answer set so empty or non-English local entries never block the student.
   const at = ' data-sub="' + esc(sub) + '" data-t="' + esc(topic) + '"';
-  let body = items.map(it => tab === "pyq"
-    ? '<p class="line">' + esc(it.q) + (it.y ? " <small>(" + esc(it.y) + ")</small>" : "") + '</p>'
-    : '<div class="qa"><p><b>Q.</b> ' + esc(it.q) + '</p><p class="ans">' + esc(it.a) + '</p></div>').join("");
-  if(!body) body = '<p class="empty">Nothing here yet. Add your notes with the + button (import) or in data.js.</p>';
+  const tabs = '<div class="row tabs">' + TABS.map(t => '<button class="mini' + (t[0] === tab ? " on" : "") + '" data-act="tab" data-tab="' + t[0] + '"' + at + '>' + t[1] + '</button>').join("") +
+    '<button class="mini" data-act="quiz"' + at + '>Take quiz</button></div>';
   $("ov").classList.add("show");
-  $("panel").innerHTML = '<div class="head"><h2>' + esc(topic) + '</h2><button class="mini" data-act="close">Close</button></div>' +
-    '<div class="row tabs">' + TABS.map(t => '<button class="mini' + (t[0] === tab ? " on" : "") + '" data-act="tab" data-tab="' + t[0] + '"' + at + '>' + t[1] + '</button>').join("") +
-    '<button class="mini" data-act="quiz"' + at + '>Take quiz</button></div>' + body;
+  $("panel").innerHTML = '<div class="head"><h2>' + esc(topic) + '</h2><button class="mini" data-act="close">Close</button></div>' + tabs +
+    '<p class="empty">Preparing English exam questions and answers…</p>';
+  let rows = [];
+  {
+    try{
+      const r=await fetch("/api/notes/generate",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({subject:sub,topic,kind:tab})});
+      const data=await r.json();
+      if(!r.ok) throw new Error(data.error||"AI generation failed");
+      rows=data.items||[];
+    }catch(error){
+      $("panel").insertAdjacentHTML("beforeend",'<p class="late">Could not generate answers: '+esc(error.message)+'. Check the Gemini API key in Render Environment Variables.</p>');
+      return;
+    }
+  }
+  const body = rows.map((it,i) => '<div class="qa"><p><b>Q'+(i+1)+'.</b> '+esc(it.q)+'</p><p class="ans"><b>Answer:</b> '+esc(it.a)+'</p></div>').join("");
+  $("panel").innerHTML = '<div class="head"><h2>' + esc(topic) + '</h2><button class="mini" data-act="close">Close</button></div>' + tabs + body;
 }
 
 // Performance card: average score, per-subject bars, weak topics, last 5 quizzes

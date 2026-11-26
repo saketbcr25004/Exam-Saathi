@@ -64,7 +64,7 @@ function isTeacher(req){
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 const TYPES = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".md": "text/markdown; charset=utf-8", ".json": "application/json; charset=utf-8", ".pdf": "application/pdf" };
 const SYSTEM = "You are ExamSaathi, a friendly exam tutor for BCA students. " +
-  "Answer in simple English, and reply in Hinglish if the student writes in Hinglish. " +
+  "Answer in clear English only. Never use Hindi, Hinglish, transliteration, or mixed-language phrases, regardless of the language used by the student. " +
   "If student notes are provided and relevant, use them. Keep answers exam-oriented: " +
   "a short definition first, then key points, then a small example if it helps. " +
   "Use plain text only, with no markdown symbols like ** or #.";
@@ -207,6 +207,58 @@ http.createServer((req, res) => {
     return send(res, 200, {ok:true});
   }
 
+
+  // Generate exam-ready Q&A automatically when local notes/PYQs are missing.
+  if(req.method === "POST" && req.url === "/api/notes/generate"){
+    readBody(req).then(async ({subject,topic,kind}) => {
+      subject=String(subject||"General").slice(0,120);
+      topic=String(topic||"").slice(0,180);
+      kind=String(kind||"short").toLowerCase();
+      if(!topic || !["short","medium","long","pyq"].includes(kind))
+        return send(res,400,{error:"A valid subject, topic and answer type are required."});
+      const all=readMaterials();
+      const terms=(subject+" "+topic).toLowerCase().split(/[^a-z0-9]+/).filter(w=>w.length>2);
+      const relevant=all.map(m=>{
+        const hay=(String(m.subject||"")+" "+String(m.topic||"")+" "+String(m.filename||"")+" "+String(m.extractedText||"")).toLowerCase();
+        return {m,score:terms.reduce((n,w)=>n+(hay.includes(w)?1:0),0)};
+      }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,4);
+      const notes=relevant.map(x=>"["+x.m.subject+" / "+x.m.topic+"]\n"+String(x.m.extractedText||"").slice(0,7000)).join("\n\n").slice(0,18000);
+      const instructions={
+        short:"Create 5 short exam questions with concise answers suitable for 2 marks (about 2-4 sentences each).",
+        medium:"Create 4 medium exam questions with well-explained answers suitable for 5 marks (about 5-8 key points or a short paragraph).",
+        long:"Create 3 long exam questions with detailed, structured answers suitable for 10 marks (definition, headings, explanation, examples and conclusion where appropriate).",
+        pyq:"Create 5 realistic previous-year-style exam questions on this topic and provide a complete model answer for each. Label them Practice PYQs; do not claim they are actual past-paper questions."
+      }[kind];
+      const system="You are ExamSaathi, an expert BCA exam tutor. ENGLISH ONLY: every question and answer must be written entirely in clear English. Never use Hindi, Hinglish, transliteration or mixed-language phrases. Use uploaded notes when relevant; if notes are missing or incomplete, use reliable general knowledge. Never say no data is available. Do not invent citations. Return valid JSON only.";
+      const prompt="Selected subject: "+subject+"\nTopic: "+topic+"\nFormat: "+kind+"\n"+instructions+
+        "\nUse simple student-friendly language and exam-ready structure.\n\nUploaded notes:\n"+(notes||"No relevant notes. Use reliable general knowledge.")+
+        '\n\nReturn exactly this JSON shape: {"items":[{"q":"question","a":"complete answer"}]}.';
+      const result=await geminiGenerate([{text:prompt}],{maxOutputTokens:kind==="long"?3500:kind==="medium"?2400:1800,responseMimeType:"application/json"},system);
+      const parsed=JSON.parse(result.answer);
+      if(!Array.isArray(parsed.items)||!parsed.items.length) throw new Error("The AI did not return question-and-answer items. Please try again.");
+      send(res,200,{items:parsed.items,model:result.model,notesUsed:relevant.length,generated:true});
+    }).catch(e=>send(res,500,{error:e.message}));
+    return;
+  }
+
+  // Dedicated endpoint for Explain Simply and Quiz Me (English-only).
+  if(req.method === "POST" && req.url === "/api/learn"){
+    readBody(req).then(async ({type,subject,topic,instructions}) => {
+      type=String(type||"").toLowerCase(); subject=String(subject||"General").slice(0,120); topic=String(topic||"").slice(0,180);
+      if(!["explain","quiz"].includes(type)||!topic) return send(res,400,{error:"A valid learning type and topic are required."});
+      const all=readMaterials();
+      const subjectNotes=all.filter(m=>String(m.subject||"").toLowerCase()===subject.toLowerCase());
+      const words=topic.toLowerCase().split(/[^a-z0-9]+/).filter(w=>w.length>2);
+      const relevant=subjectNotes.map(m=>{const hay=(String(m.topic||"")+" "+String(m.filename||"")+" "+String(m.extractedText||"").slice(0,12000)).toLowerCase();return {m,score:words.reduce((n,w)=>n+(hay.includes(w)?1:0),0)};}).sort((a,b)=>b.score-a.score).slice(0,5);
+      const noteText=relevant.map(x=>"["+x.m.subject+" / "+x.m.topic+"]\n"+String(x.m.extractedText||"").slice(0,9000)).join("\n\n").slice(0,24000);
+      const system="You are ExamSaathi, an expert exam tutor. You MUST write every word in English only. Never use Hindi, Hinglish, transliteration, or mixed-language phrases. Prefer the selected subject's uploaded notes when relevant, but do not limit yourself to the syllabus: if the topic is outside the uploaded notes or syllabus, use reliable general knowledge to explain it or create a quiz. Never refuse solely because a topic is out of syllabus. Be accurate and avoid fabricated details. Return valid JSON only, with no markdown fences.";
+      const prompt="Task: "+type+"\nSelected subject: "+subject+"\nTopic: "+topic+"\nInstructions: "+String(instructions||"")+"\n\nRelevant uploaded study notes:\n"+(noteText||"No matching uploaded notes found for this subject and topic.")+"\n\nDo not refuse because a topic is outside the syllabus. Output valid JSON only. For explain use {\"points\":[five short English points]}. For quiz use {\"questions\":[{\"question\":\"...\",\"options\":[\"...\",\"...\",\"...\",\"...\"],\"answer\":0}]} with exactly five questions and answer index 0-3.";
+      const result=await geminiGenerate([{text:prompt}],{maxOutputTokens:type==="quiz"?1800:900,responseMimeType:"application/json"},system);
+      send(res,200,{result:result.answer,model:result.model,notesUsed:relevant.length});
+    }).catch(e=>send(res,500,{error:e.message}));
+    return;
+  }
+
   // 1. The AI endpoint: the browser sends { question, notes }
   if(req.method === "POST" && req.url === "/api/ask"){
     let body = "";
@@ -222,8 +274,11 @@ http.createServer((req, res) => {
         const relevant = chosenSubject ? materials.filter(m => m.subject.toLowerCase() === chosenSubject.toLowerCase()).slice(0,8) : [];
         const teacherContext = relevant.map(m => "[" + m.subject + " / " + m.topic + "]\n" + m.extractedText).join("\n\n");
         const scopedNotes = [teacherContext, String(notes || "").slice(0, 7000)].filter(Boolean).join("\n\n").slice(0, 10000);
-        const prompt = (chosenSubject ? "The student's selected subject is " + chosenSubject + ". Answer ONLY within this subject. Do not mix notes from other subjects. If the question is outside this subject, ask them to select the correct subject.\n\n" : "Identify the subject from the question. Do not mix unrelated subjects.\n\n") + (scopedNotes ? "Relevant notes for this subject:\n" + scopedNotes + "\n\n" : "") + "Question: " + question;
-        const result = await geminiGenerate([{text:prompt}], {maxOutputTokens:700}, SYSTEM);
+        const prompt = (chosenSubject ? "The student's selected subject is " + chosenSubject + ". " : "The student has not selected a subject. Identify the topic from the question. ") +
+          "Answer the question even if it is outside the student's uploaded syllabus or notes. First use relevant uploaded notes when they help; if the question is out of syllabus or notes do not cover it, answer from your general knowledge. Do not refuse merely because a question is out of syllabus. If it is outside the selected subject, still answer it and clearly mention the likely subject area. If a question is ambiguous, state your assumption. Be accurate and admit uncertainty rather than inventing facts.\\n\\n" +
+          (scopedNotes ? "Uploaded notes (use only if relevant; they are not a restriction on what you may answer):\\n" + scopedNotes + "\\n\\n" : "No matching notes were found. Use your general knowledge.\\n\\n") +
+          "Student's question: " + question;
+        const result = await geminiGenerate([{text:prompt}], {maxOutputTokens:1100}, SYSTEM);
         return send(res, 200, { answer: result.answer, provider: "Gemini", model: result.model });
       }catch(e){ send(res, 500, { error: e.message }); }
     });

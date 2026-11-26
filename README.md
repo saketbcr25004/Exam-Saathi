@@ -48,3 +48,24 @@ Potential duplicate copies are retained, not deleted. Check `materials/catalog.j
 
 ## Security
 Never commit API keys or teacher passwords. If either was exposed in a screenshot or repository, rotate it and update the Render Environment variables.
+
+
+## Learning features update
+- Explain Simply and Quiz Me use the subject-specific `/api/learn` endpoint.
+- AI output is required to be English only; offline fallback is also English.
+- Study PDFs and DOCX notes are indexed in `materials.json` and stored under `materials/`.
+- Keep `GEMINI_API_KEY` and `TEACHER_PASSWORD` in Render Environment Variables; never commit `.env`.
+
+
+## Out-of-syllabus AI support
+- Ask AI answers questions even when they are outside the uploaded notes or syllabus, using Gemini general knowledge.
+- Explain Simply and Quiz Me can also cover topics not present in the uploaded notes.
+- Uploaded notes are used as supporting context, not as a restriction. The tutor should state uncertainty instead of inventing facts.
+
+
+## Automatic English exam answers
+- Ask AI, Explain Simply, Quiz Me, and generated answers are instructed to respond in English only.
+- Short, Medium, Long, and PYQ tabs automatically generate exam-style questions with model answers when the local notes library has no matching content.
+- The generator uses uploaded study notes when relevant and falls back to general knowledge for missing or out-of-syllabus topics.
+- Generated PYQ-style questions are practice questions, not claims about actual previous exam papers.
+- Set `GEMINI_API_KEY` in Render Environment Variables. The server tries `gemini-3.5-flash-lite` first and `gemini-3.8-flash` as a fallback. An API key and available Gemini quota are required; no app can call a paid/hosted AI model without valid credentials.
